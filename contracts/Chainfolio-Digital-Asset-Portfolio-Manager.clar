@@ -156,6 +156,55 @@
   )
 )
 
+;; NEW: Validates lock reason strings
+(define-private (validate-lock-reason (lock-reason (string-ascii 128)))
+  (let ((reason-length (len lock-reason)))
+    (and (> reason-length u0) (<= reason-length u128))
+  )
+)
+
+;; NEW: Validates emergency unlock key
+(define-private (validate-emergency-unlock-key (unlock-key (optional principal)))
+  (match unlock-key
+    key (validate-principal-address key)
+    true ;; None is always valid
+  )
+)
+
+;; ===== Primary System Functions =====
+
+;; Creates a new digital asset portfolio with comprehensive validation
+(define-public (create-digital-asset-portfolio 
+  (proposed-asset-name (string-ascii 64))
+  (asset-data-size uint)
+  (asset-metadata (string-ascii 128))
+  (classification-labels (list 10 (string-ascii 32)))
+)
+  (let 
+    (
+      (new-portfolio-id (+ (var-get total-portfolio-count) u1))
+      (current-block-height block-height)
+      (validated-metadata asset-metadata) ;; Create validated copy
+    )
+    ;; Comprehensive input validation
+    (asserts! (validate-asset-naming-standards proposed-asset-name) SYSTEM-ERROR-TITLE-VALIDATION)
+    (asserts! (validate-asset-size-requirements asset-data-size) SYSTEM-ERROR-SIZE-VALIDATION)
+    (asserts! (validate-classification-tags classification-labels) SYSTEM-ERROR-TAG-VALIDATION)
+    (asserts! (validate-metadata-content asset-metadata) SYSTEM-ERROR-INVALID-METADATA)
+    (asserts! (not (portfolio-exists-check new-portfolio-id)) SYSTEM-ERROR-DUPLICATE-ENTRY)
+
+    ;; Portfolio creation and registration with validated data
+    (map-set digital-asset-portfolio 
+      { portfolio-identifier: new-portfolio-id }
+      {
+        asset-name: proposed-asset-name,
+        portfolio-owner: tx-sender,
+        asset-data-size: asset-data-size,
+        creation-timestamp: current-block-height,
+        asset-metadata: validated-metadata,
+        classification-labels: classification-labels
+      }
+    )
 
     ;; Update global counter
     (var-set total-portfolio-count new-portfolio-id)
@@ -210,7 +259,10 @@
       existing-portfolio
       (begin
         (map-set digital-asset-portfolio
-         
+          { portfolio-identifier: portfolio-identifier }
+          (merge existing-portfolio { portfolio-owner: new-portfolio-owner })
+        )
+        (ok true)
       )
       SYSTEM-ERROR-NOT-LOCATED
     )
@@ -227,7 +279,19 @@
     (asserts! (validate-portfolio-ownership portfolio-identifier tx-sender) SYSTEM-ERROR-OWNER-VERIFICATION)
     (asserts! (validate-principal-address authorized-viewer) SYSTEM-ERROR-INVALID-PRINCIPAL)
 
-    
+    (map-set portfolio-access-control
+      { portfolio-identifier: portfolio-identifier, authorized-viewer: validated-viewer }
+      { viewing-granted: true }
+    )
+    (ok true)
+  )
+)
+
+;; Revokes previously granted viewing permissions
+(define-public (revoke-portfolio-viewing-access 
+  (portfolio-identifier uint)
+  (unauthorized-viewer principal)
+)
   (let ((validated-viewer unauthorized-viewer)) ;; Create validated copy
     (asserts! (portfolio-exists-check portfolio-identifier) SYSTEM-ERROR-NOT-LOCATED)
     (asserts! (validate-portfolio-ownership portfolio-identifier tx-sender) SYSTEM-ERROR-OWNER-VERIFICATION)
